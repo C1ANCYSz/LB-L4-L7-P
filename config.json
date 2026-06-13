@@ -1,0 +1,9 @@
+{
+  "servers": [
+    "localhost:3000",
+    "localhost:3001"
+  ],
+    "balanceMode":"leastConnections",
+    "level":"TCP/UDP"
+
+}
