@@ -17,7 +17,9 @@ func TestHandleConn(t *testing.T) {
 	defer backend.Close()
 	t.Logf("backend listening on %s", backend.Addr())
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		conn, err := backend.Accept()
 		if err != nil {
 			return
@@ -40,7 +42,6 @@ func TestHandleConn(t *testing.T) {
 		balanceMode: LeastConn,
 	}
 	clientSide, lbSide := net.Pipe()
-	defer clientSide.Close()
 	t.Logf("client connected, handing to handleConn")
 
 	go lb.handleConn(lbSide)
@@ -63,4 +64,7 @@ func TestHandleConn(t *testing.T) {
 		t.Fatalf("expected %q got %q", msg, buf)
 	}
 	t.Log("✓ data round-tripped through LB")
+	
+	clientSide.Close()
+	<-done
 }

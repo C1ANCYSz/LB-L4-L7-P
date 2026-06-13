@@ -3,8 +3,9 @@
     "localhost:3000",
     "localhost:3001"
   ],
-    "balanceMode":"leastConnections",
+    "balanceMode":"ipHash",
     "level":"TCP/UDP",
-    "maxConnections":5000
+    "maxConnections":10000,
+    "pingIntervalMs":5
 
 }

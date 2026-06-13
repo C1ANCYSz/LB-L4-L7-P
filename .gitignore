@@ -1,1 +1,4 @@
 /tmp
+*.exe
+*.log
+*.md

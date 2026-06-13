@@ -3,6 +3,8 @@ package main
 import (
 	"log"
 	"log/slog"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -17,31 +19,41 @@ func main() {
 	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
 	ticker := time.NewTicker(time.Second * 5)
 
-	serversUrls, balanceMode := LoadConfig()
-	servers := make([]Server, 0, len(serversUrls))
-	for _, url := range serversUrls {
+	serversUrls, balanceMode, lbLevel, maxConn := LoadConfig()
 
-		servers = append(servers, Server{
-			url: url,
-
-			// pool: make(chan net.Conn, 10),
-			// up defaults to false (zero value), connections defaults to 0
-		})
+	resolvedURLs := make([]string, len(serversUrls))
+	for i, url := range serversUrls {
+		resolved, err := resolveHost(url)
+		if err != nil {
+			log.Fatalf("failed to resolve %s: %v", url, err)
+		}
+		resolvedURLs[i] = resolved
+		log.Printf("resolved %s → %s", url, resolved)
 	}
 
+	servers := make([]Server, 0, len(serversUrls))
+	for _, url := range resolvedURLs {
+		servers = append(servers, Server{url: url})
+	}
+
+	go func() {
+		http.ListenAndServe("localhost:6060", nil)
+	}()
 	lb := &LoadBalancer{
 		quit:        make(chan struct{}),
 		logger:      logger,
 		servers:     servers,
 		balanceMode: balanceMode,
+		level:       lbLevel,
+		maxConn:     maxConn,
 	}
-
+	lb.startReResolver(serversUrls, time.Second*1)
+	lb.pingServers()
 	go func() {
 		if err := lb.Listen(":8080"); err != nil {
 			log.Fatal(err)
 		}
 	}()
-	lb.pingServers()
 	for {
 		select {
 		case <-quit:

@@ -2,21 +2,24 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
-	"log"
 	"log/slog"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/netutil"
 )
+
+var bufPool = sync.Pool{
+	New: func() any {
+		buf := make([]byte, 256*1024)
+		return &buf
+	},
+}
 
 type LoadBalancer struct {
 	listener    net.Listener
@@ -25,27 +28,16 @@ type LoadBalancer struct {
 	logger      *slog.Logger
 	servers     []Server
 	balanceMode BalanceMode
+	Debug       bool
+	level       LBLevel
+	maxConn     int
 }
 
-type Server struct {
-	url         string
-	up          atomic.Bool
-	connections atomic.Int64
+var dialer = &net.Dialer{
+	Timeout:   time.Second,
+	KeepAlive: 30 * time.Second,
 }
 
-func isBenignConnError(err error) bool {
-	if err == nil {
-		return true
-	}
-	if errors.Is(err, net.ErrClosed) || errors.Is(err, io.EOF) {
-		return true
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "forcibly closed by the remote host") ||
-		strings.Contains(msg, "connection reset by peer") ||
-		strings.Contains(msg, "broken pipe") ||
-		strings.Contains(msg, "use of closed network connection")
-}
 func (lb *LoadBalancer) Listen(addr string) error {
 	//init listener on tcp
 	listener, err := net.Listen("tcp", addr)
@@ -53,7 +45,7 @@ func (lb *LoadBalancer) Listen(addr string) error {
 		return err
 	}
 	//limit listener to 10K concurrent listeners to avoid go routines leaks
-	lb.listener = netutil.LimitListener(listener, 10_000)
+	lb.listener = netutil.LimitListener(listener, int(lb.maxConn))
 	defer lb.listener.Close()
 
 	for {
@@ -78,29 +70,43 @@ func (lb *LoadBalancer) Listen(addr string) error {
 
 func (lb *LoadBalancer) pingServers() {
 	var up int
-
 	for idx := range lb.servers {
 		server := &lb.servers[idx]
-		resp, err := http.Get("http://" + server.url)
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Get("http://" + server.url + "/health")
 		if err != nil {
 			lb.logger.Error("ping error", slog.Any("err", err))
-			lb.servers[idx].up.Store(false)
+			server.up.Store(false)
 			continue
-		} else {
-			lb.servers[idx].up.Store(true)
-			log.Printf("server connections: %v\n", &server.connections)
-
 		}
-		up++
 		resp.Body.Close()
-
+		server.up.Store(true)
+		up++
 	}
-
-	msg := fmt.Sprintf("%d/%d are up", up, len(lb.servers))
-
-	lb.logger.Info(msg)
+	lb.logger.Info(fmt.Sprintf("%d/%d are up", up, len(lb.servers)))
 
 }
+func (lb *LoadBalancer) startReResolver(originalURLs []string, interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			lb.reResolveServers(originalURLs)
+		}
+	}()
+}
+func (lb *LoadBalancer) reResolveServers(originalURLs []string) {
+	for i, original := range originalURLs {
+		resolved, err := resolveHost(original)
+		if err != nil {
+			continue
+		}
+		lb.servers[i].url = resolved
+	}
+}
+
+// call every 30s in a goroutine alongside pingServers
+
 func (lb *LoadBalancer) getIPHashServer(ip string) *Server {
 	h := fnv.New32a()
 	h.Write([]byte(ip))
@@ -128,10 +134,16 @@ func (lb *LoadBalancer) getLeastConnServer() *Server {
 	return server
 }
 func (lb *LoadBalancer) handleConn(clientConn net.Conn) {
+
+	buf1 := bufPool.Get().(*[]byte)
+	buf2 := bufPool.Get().(*[]byte)
+	defer bufPool.Put(buf1)
+	defer bufPool.Put(buf2)
+
 	var server *Server
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	ip := clientConn.RemoteAddr().(*net.TCPAddr).IP.String()
+	ip := getClientIP(clientConn.RemoteAddr())
 
 	wg := sync.WaitGroup{}
 
@@ -152,14 +164,12 @@ func (lb *LoadBalancer) handleConn(clientConn net.Conn) {
 	defer server.connections.Add(-1)
 
 	dialStart := time.Now()
-	backendConn, err := net.DialTimeout("tcp", server.url, 5*time.Second)
+	backendConn, err := dialer.DialContext(ctx, "tcp", server.url)
 	if err != nil {
 		lb.logger.Error("dial error", slog.Any("err", err))
 		clientConn.Close()
 		return
 	}
-	// defer backendConn.Close()
-	// defer clientConn.Close()
 
 	go func() {
 		<-ctx.Done()
@@ -172,7 +182,7 @@ func (lb *LoadBalancer) handleConn(clientConn net.Conn) {
 	var sentBytes, recvBytes int64
 
 	wg.Go(func() {
-		n, err := io.Copy(backendConn, clientConn)
+		n, err := io.CopyBuffer(backendConn, clientConn, *buf1)
 		sentBytes = n
 
 		sendErrKind := classifyConnError(err)
@@ -187,7 +197,7 @@ func (lb *LoadBalancer) handleConn(clientConn net.Conn) {
 		}
 	})
 	wg.Go(func() {
-		n, err := io.Copy(clientConn, backendConn)
+		n, err := io.CopyBuffer(clientConn, backendConn, *buf2)
 		recvBytes = n
 		recvErrKind := classifyConnError(err)
 		if recvErrKind != ErrKindNone && recvErrKind != ErrKindBenign && recvErrKind != ErrKindCancelled {
@@ -202,15 +212,17 @@ func (lb *LoadBalancer) handleConn(clientConn net.Conn) {
 
 	wg.Wait()
 
-	lb.logger.Info("served",
-		slog.String("client", ip),
-		slog.String("server", server.url),
-		slog.Duration("dial_took", dialTook),
-		slog.Duration("total", time.Since(start)),
-		slog.Int64("sent_bytes", sentBytes),
-		slog.Int64("recv_bytes", recvBytes),
-		slog.Int64("server_connections", server.connections.Load()),
-	)
+	if lb.Debug {
+		lb.logger.Info("served",
+			slog.String("client", ip),
+			slog.String("server", server.url),
+			slog.Duration("dial_took", dialTook),
+			slog.Duration("total", time.Since(start)),
+			slog.Int64("sent_bytes", sentBytes),
+			slog.Int64("recv_bytes", recvBytes),
+			slog.Int64("server_connections", server.connections.Load()),
+		)
+	}
 }
 
 func (lb *LoadBalancer) handleConnError(direction string, err error, kind ConnErrKind, server *Server) {
@@ -257,3 +269,22 @@ func (lb *LoadBalancer) Shutdown() {
 	close(lb.quit)
 	lb.listener.Close()
 }
+
+func getClientIP(addr net.Addr) string {
+	if addr == nil {
+		return ""
+	}
+	switch a := addr.(type) {
+	case *net.TCPAddr:
+		return a.IP.String()
+	case *net.UDPAddr:
+		return a.IP.String()
+	}
+	// Fallback for mock/pipe/unix domain socket addresses
+	str := addr.String()
+	if host, _, err := net.SplitHostPort(str); err == nil {
+		return host
+	}
+	return str
+}
+
