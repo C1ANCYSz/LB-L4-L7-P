@@ -3,7 +3,6 @@ package main
 import (
 	"log"
 	"log/slog"
-	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,16 +13,18 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
-
-	serversUrls, balanceMode := LoadConfig()
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
 	ticker := time.NewTicker(time.Second * 20)
+
+	serversUrls, balanceMode := LoadConfig()
 	servers := make([]Server, 0, len(serversUrls))
 	for _, url := range serversUrls {
+
 		servers = append(servers, Server{
-			url:  url,
-			pool: make(chan net.Conn, 10),
+			url: url,
+
+			// pool: make(chan net.Conn, 10),
 			// up defaults to false (zero value), connections defaults to 0
 		})
 	}

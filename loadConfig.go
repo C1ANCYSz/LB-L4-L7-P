@@ -6,13 +6,6 @@ import (
 	"os"
 )
 
-type LBLevel string
-
-const (
-	TCP  LBLevel = "TCP/UDP"
-	HTTP LBLevel = "HTTP"
-)
-
 type Config struct {
 	Servers     []string    `json:"servers"`
 	BalanceMode BalanceMode `json:"balanceMode"`

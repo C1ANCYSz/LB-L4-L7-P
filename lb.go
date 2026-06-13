@@ -1,10 +1,11 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
-	"log"
 	"log/slog"
 	"net"
 	"net/http"
@@ -28,30 +29,9 @@ type LoadBalancer struct {
 type Server struct {
 	url         string
 	up          atomic.Bool
-	connections int64
-	pool        chan net.Conn
+	connections atomic.Int64
 }
 
-func (s *Server) getConn() (net.Conn, error) {
-	select {
-	case conn := <-s.pool:
-		log.Printf("REUSE pool size=%d cap=%d", len(s.pool), cap(s.pool))
-		return conn, nil
-	default:
-		log.Printf("DIAL pool size=%d cap=%d", len(s.pool), cap(s.pool))
-		return net.DialTimeout("tcp", s.url, 5*time.Second)
-	}
-}
-
-func (s *Server) returnConn(conn net.Conn) {
-	select {
-	case s.pool <- conn:
-		log.Printf("RETURN pool size=%d cap=%d", len(s.pool), cap(s.pool))
-	default:
-		log.Printf("DISCARD pool full size=%d cap=%d", len(s.pool), cap(s.pool))
-		conn.Close()
-	}
-}
 func isBenignConnError(err error) bool {
 	if err == nil {
 		return true
@@ -119,44 +99,56 @@ func (lb *LoadBalancer) pingServers() {
 	lb.logger.Info(msg)
 
 }
+func (lb *LoadBalancer) getIPHashServer(ip string) *Server {
+	h := fnv.New32a()
+	h.Write([]byte(ip))
+	idx := int(h.Sum32()) % len(lb.servers)
 
-func (lb *LoadBalancer) getConnServer() *Server {
+	// Try the hashed server first, fall back to least-conn if it's down
+	if lb.servers[idx].up.Load() {
+		return &lb.servers[idx]
+	}
+	return lb.getLeastConnServer()
+}
+func (lb *LoadBalancer) getLeastConnServer() *Server {
 
 	var server *Server
-
-	switch lb.balanceMode {
-	case RoundRobin:
-		// TODO
-
-	case LeastConn:
-		for i := range lb.servers {
-			s := &lb.servers[i]
-			if !s.up.Load() {
-				continue
-			}
-			if server == nil || atomic.LoadInt64(&s.connections) < atomic.LoadInt64(&server.connections) {
-				server = s
-			}
+	for i := range lb.servers {
+		s := &lb.servers[i]
+		if !s.up.Load() {
+			continue
 		}
-
-	case IpHash:
-		// TODO
+		if server == nil || s.connections.Load() < server.connections.Load() {
+			server = s
+		}
 	}
 
 	return server
 }
 func (lb *LoadBalancer) handleConn(clientConn net.Conn) {
-	wg := sync.WaitGroup{}
-	start := time.Now()
+	var server *Server
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ip := clientConn.RemoteAddr().(*net.TCPAddr).IP.String()
+	lb.logger.Info("new connection", slog.String("ip", ip))
 
-	server := lb.getConnServer()
+	wg := sync.WaitGroup{}
+
+	start := time.Now()
+	switch lb.balanceMode {
+	case IpHash:
+		server = lb.getIPHashServer(ip)
+	default:
+		server = lb.getLeastConnServer()
+	}
+
 	if server == nil {
 		lb.logger.Error("no upstream servers available")
 		clientConn.Close()
 		return
 	}
-	atomic.AddInt64(&server.connections, 1)
-	defer atomic.AddInt64(&server.connections, -1)
+	server.connections.Add(1)
+	defer server.connections.Add(-1)
 
 	dialStart := time.Now()
 	backendConn, err := net.DialTimeout("tcp", server.url, 5*time.Second)
@@ -168,6 +160,13 @@ func (lb *LoadBalancer) handleConn(clientConn net.Conn) {
 	defer backendConn.Close()
 	defer clientConn.Close()
 
+	go func() {
+		<-ctx.Done()
+		backendConn.Close()
+		clientConn.Close()
+
+	}()
+
 	dialTook := time.Since(dialStart)
 
 	var sentBytes, recvBytes int64
@@ -177,15 +176,24 @@ func (lb *LoadBalancer) handleConn(clientConn net.Conn) {
 		n, err := io.Copy(backendConn, clientConn)
 		sentBytes = n
 		sendErr = err
+		if err != nil && !isBenignConnError(err) {
+
+			cancel()
+			return
+		}
+
 		if tcp, ok := backendConn.(*net.TCPConn); ok {
 			tcp.CloseWrite()
 		}
 	})
-
 	wg.Go(func() {
 		n, err := io.Copy(clientConn, backendConn)
 		recvBytes = n
 		recvErr = err
+		if err != nil && !isBenignConnError(err) {
+			cancel()
+			return
+		}
 		if tcp, ok := clientConn.(*net.TCPConn); ok {
 			tcp.CloseWrite()
 		}
