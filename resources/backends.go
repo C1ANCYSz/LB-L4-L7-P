@@ -6,10 +6,12 @@ import (
 )
 
 type Backend struct {
-	Up           atomic.Bool
-	Address      atomic.Pointer[string]
-	PingEndpoint string
-	Connections  atomic.Int64
+	Up              atomic.Bool
+	OriginalAddress string
+	Address         atomic.Pointer[string]
+	PingEndpoint    string
+	Connections     atomic.Int64
+	Resolving       atomic.Bool
 }
 type BackendPool struct {
 	Backends []Backend
@@ -45,7 +47,9 @@ func NewBackendPool(backendsUrls []string) *BackendPool {
 	backends := make([]Backend, len(backendsUrls))
 
 	for i, url := range backendsUrls {
-		backends[i].Address.Store(&url)
+		backends[i].OriginalAddress = url
+		u := url
+		backends[i].Address.Store(&u)
 		backends[i].Up.Store(false)
 	}
 

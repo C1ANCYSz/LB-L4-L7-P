@@ -42,12 +42,13 @@ func main() {
 	lb.Runtime.Store(runtime)
 	configManager.OnReload = func(cfg *config.Config) {
 		lb.Reload(cfg)
+		lb.ResolveAllBackends()
 		lb.PingServers()
 
 	}
+	lb.ResolveAllBackends()
+	lb.StartDNSResolver(time.Duration(configManager.Get().DNSRefreshIntervalMs) * time.Millisecond)
 	lb.PingServers()
-
-	// lb.startReResolver(configManager.Get().BackendsUrls, time.Second*1)
 
 	go func() {
 		if err := lb.Listen(":8080"); err != nil {

@@ -23,6 +23,7 @@ func (lb *LoadBalancer) handleConnError(direction string, err error, kind ConnEr
 			slog.String("server", *server.Address.Load()),
 			slog.Any("err", err),
 		)
+		go lb.ResolveBackend(server)
 	case ErrKindUnreachable:
 		server.Up.Store(false)
 		lb.Logger.Error("backend unreachable",
@@ -30,6 +31,7 @@ func (lb *LoadBalancer) handleConnError(direction string, err error, kind ConnEr
 			slog.String("server", *server.Address.Load()),
 			slog.Any("err", err),
 		)
+		go lb.ResolveBackend(server)
 	case ErrKindExhausted:
 		// this is a system-level emergency
 		lb.Logger.Error("RESOURCE EXHAUSTION — file descriptors or memory",

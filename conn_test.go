@@ -37,6 +37,7 @@ func TestHandleConn(t *testing.T) {
 
 	servers := make([]resources.Backend, 1)
 	addr := backend.Addr().String()
+	servers[0].OriginalAddress = addr
 	servers[0].Address.Store(&addr)
 	servers[0].Up.Store(true)
 

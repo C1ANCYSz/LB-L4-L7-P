@@ -3,7 +3,6 @@ package config
 import (
 	"encoding/json"
 	"errors"
-	"lb-go/utils"
 	"log"
 	"os"
 )
@@ -13,13 +12,14 @@ type Backend struct {
 	pingEndpoint string
 }
 type Config struct {
-	BackendsUrls   []string    `json:"backends"`
-	BalanceMode    BalanceMode `json:"balanceMode"`
-	LBLevel        LBLevel     `json:"level"`
-	MaxConn        int         `json:"maxConnections"`
-	IdleTimeoutMs  int         `json:"idleTimeoutMs"`
-	PingIntervalMs int         `json:"pingIntervalMs"`
-	Debug          bool        `json:"debug"`
+	BackendsUrls         []string    `json:"backends"`
+	BalanceMode          BalanceMode `json:"balanceMode"`
+	LBLevel              LBLevel     `json:"level"`
+	MaxConn              int         `json:"maxConnections"`
+	IdleTimeoutMs        int         `json:"idleTimeoutMs"`
+	PingIntervalMs       int         `json:"pingIntervalMs"`
+	DNSRefreshIntervalMs int         `json:"dnsRefreshIntervalMs,omitempty"`
+	Debug                bool        `json:"debug"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -36,8 +36,9 @@ func LoadConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	resolvedUrls := utils.ResolveUrls(config.BackendsUrls)
-	config.BackendsUrls = resolvedUrls
+	if config.DNSRefreshIntervalMs == 0 {
+		config.DNSRefreshIntervalMs = 15000 // 15 seconds default
+	}
 	config.logConfig()
 
 	return config, nil
