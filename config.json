@@ -1,11 +1,17 @@
 {
-  "servers": [
-    "localhost:3000",
-    "localhost:3001"
+  "IGNORE":[
+    "www.google.com:80"],
+  "backends": [
+    
+    "localhost:3001",
+    "localhost:3000" 
   ],
     "balanceMode":"ipHash",
     "level":"TCP/UDP",
-    "maxConnections":10000,
-    "pingIntervalMs":5
+    "maxConnections":12000,
+    "pingIntervalMs":20000,
+   
+    "debug":false,
+    "idleTimeoutMs":5000
 
 }

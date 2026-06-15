@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"io"
+	config "lb-go/config"
+	"lb-go/l4"
+	"lb-go/resources"
 	"log/slog"
 	"net"
 	"os"
@@ -32,19 +35,28 @@ func TestHandleConn(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	servers := make([]Server, 1)
-	servers[0].url = backend.Addr().String()
-	servers[0].up.Store(true)
+	servers := make([]resources.Backend, 1)
+	addr := backend.Addr().String()
+	servers[0].Address.Store(&addr)
+	servers[0].Up.Store(true)
 
-	lb := &LoadBalancer{
-		logger:      logger,
-		servers:     servers,
-		balanceMode: LeastConn,
+	rt := &config.Runtime{
+		Config: &config.Config{
+			BalanceMode:   config.LeastConn,
+			IdleTimeoutMs: 200,
+		},
+		BackendPool: &resources.BackendPool{
+			Backends: servers,
+		},
 	}
-	clientSide, lbSide := net.Pipe()
+	lb := &l4.LoadBalancer{
+		Logger: logger,
+	}
+	lb.Runtime.Store(rt)
+	clientSide, lbSide := tcpPipe(t)
 	t.Logf("client connected, handing to handleConn")
 
-	go lb.handleConn(lbSide)
+	go lb.HandleConn(lbSide)
 
 	msg := []byte("hello backend")
 	t.Logf("client sending: %q", msg)
@@ -64,7 +76,25 @@ func TestHandleConn(t *testing.T) {
 		t.Fatalf("expected %q got %q", msg, buf)
 	}
 	t.Log("✓ data round-tripped through LB")
-	
+
 	clientSide.Close()
 	<-done
+}
+func tcpPipe(t *testing.T) (client, server net.Conn) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	done := make(chan net.Conn, 1)
+	go func() {
+		c, _ := ln.Accept()
+		done <- c
+	}()
+	client, err = net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client, <-done
 }

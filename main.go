@@ -1,68 +1,76 @@
 package main
 
 import (
+	config "lb-go/config"
+	"lb-go/l4"
 	"log"
-	"log/slog"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
-	"os"
-	"os/signal"
-	"syscall"
+	"sync"
 	"time"
 )
 
 func main() {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
-	ticker := time.NewTicker(time.Second * 5)
 
-	serversUrls, balanceMode, lbLevel, maxConn := LoadConfig()
+	logger := CreateLogger()
 
-	resolvedURLs := make([]string, len(serversUrls))
-	for i, url := range serversUrls {
-		resolved, err := resolveHost(url)
-		if err != nil {
-			log.Fatalf("failed to resolve %s: %v", url, err)
-		}
-		resolvedURLs[i] = resolved
-		log.Printf("resolved %s → %s", url, resolved)
+	quit := GracefulShutdownChan()
+
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	servers := make([]Server, 0, len(serversUrls))
-	for _, url := range resolvedURLs {
-		servers = append(servers, Server{url: url})
-	}
+	configManager := config.NewConfigManager(cfg, logger)
 
+	go configManager.Watch()
+
+	pingServersTicker := time.NewTicker(time.Duration(configManager.Get().PingIntervalMs) * time.Millisecond)
+
+	//for keeping track of goroutines
 	go func() {
 		http.ListenAndServe("localhost:6060", nil)
 	}()
-	lb := &LoadBalancer{
-		quit:        make(chan struct{}),
-		logger:      logger,
-		servers:     servers,
-		balanceMode: balanceMode,
-		level:       lbLevel,
-		maxConn:     maxConn,
+	runtime := config.NewRuntime(cfg)
+	lb := &l4.LoadBalancer{
+		Quit:     quit,
+		Listener: net.Listener(nil),
+		Wg:       sync.WaitGroup{},
+		Logger:   logger,
 	}
-	lb.startReResolver(serversUrls, time.Second*1)
-	lb.pingServers()
+	lb.Runtime.Store(runtime)
+	configManager.OnReload = func(cfg *config.Config) {
+		lb.Reload(cfg)
+		lb.PingServers()
+
+	}
+	lb.PingServers()
+
+	// lb.startReResolver(configManager.Get().BackendsUrls, time.Second*1)
+
 	go func() {
 		if err := lb.Listen(":8080"); err != nil {
 			log.Fatal(err)
 		}
 	}()
+
 	for {
 		select {
 		case <-quit:
-			ticker.Stop()
-			lb.Shutdown()
-			return
+			pingServersTicker.Stop()
+			{
+				lb.Shutdown()
+				return
+			}
 
-		case <-ticker.C:
-			lb.pingServers()
+		case <-pingServersTicker.C:
+			{
+				lb.PingServers()
+
+				newInterval := time.Duration(configManager.Get().PingIntervalMs) * time.Millisecond
+				pingServersTicker.Reset(newInterval)
+			}
 
 		}
 
