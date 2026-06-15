@@ -1,15 +1,18 @@
 {
   "IGNORE":[
-    "www.google.com:80"],
+    "www.google.com:80",
+ 
+    "aws-0-eu-west-1.pooler.supabase.com:5432"
+],
   "backends": [
     
-    "localhost:3001",
-    "localhost:3000" 
-  ],
+    "http://localhost:3001",
+    "http://localhost:3000"],
     "balanceMode":"ipHash",
     "level":"TCP/UDP",
     "maxConnections":12000,
     "pingIntervalMs":20000,
+    "dnsRefreshIntervalMs":15000,
    
     "debug":false,
     "idleTimeoutMs":5000
