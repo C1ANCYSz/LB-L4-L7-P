@@ -18,7 +18,7 @@
     "idleTimeoutMs":5000,
     "tls":"passthrough",
     "proxyProtocol":{
-      "enabled":false,
+      "enabled":true,
       "version":2
     }
 

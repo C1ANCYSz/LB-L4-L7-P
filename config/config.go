@@ -76,7 +76,7 @@ func (c Config) validateConfig() error {
 func (c Config) logConfig() {
 	var proxyStatus string
 	if c.ProxyProtocol.Enabled {
-		proxyStatus = "V" + fmt.Sprint(c.ProxyProtocol.Version)
+		proxyStatus = "V" + fmt.Sprint(*c.ProxyProtocol.Version)
 	} else {
 		proxyStatus = "Disabled"
 	}

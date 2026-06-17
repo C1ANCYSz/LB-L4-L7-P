@@ -54,11 +54,10 @@ func (lb *LoadBalancer) HandleConn(clientConn net.Conn) {
 	connTimeout := time.Duration(rt.Config.IdleTimeoutMs) * time.Millisecond
 
 	ok := lb.handleProxy(&handleProxyProps{
-		clientConn:     clientConn,
-		backendConn:    backendConn,
-		rt:             rt,
-		backendAddress: backend.Address.Load(),
-		closeBoth:      closeBoth,
+		clientConn:  clientConn,
+		backendConn: backendConn,
+		rt:          rt,
+		closeBoth:   closeBoth,
 	})
 
 	if !ok {
