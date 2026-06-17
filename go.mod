@@ -4,6 +4,7 @@ go 1.26.3
 
 require (
 	github.com/fsnotify/fsnotify v1.10.1
+	github.com/pires/go-proxyproto v0.12.0
 	golang.org/x/net v0.56.0
 )
 

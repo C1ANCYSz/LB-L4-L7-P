@@ -1,8 +1,6 @@
 package l4
 
 import (
-	"lb-go/config"
-	"lb-go/resources"
 	"log/slog"
 	"net"
 	"sync"
@@ -11,31 +9,24 @@ import (
 )
 
 func (lb *LoadBalancer) HandleConn(clientConn net.Conn) {
-
+	rt := lb.Runtime.Load()
+	var copyWG sync.WaitGroup
 	buf1 := bufPool.Get().(*[]byte)
 	buf2 := bufPool.Get().(*[]byte)
 	defer bufPool.Put(buf1)
 	defer bufPool.Put(buf2)
 
-	var backend *resources.Backend
-	ip := getClientIP(clientConn.RemoteAddr())
-
-	wg := sync.WaitGroup{}
-	rt := lb.Runtime.Load()
+	clientIP := getClientIP(clientConn.RemoteAddr())
 
 	start := time.Now()
-	switch rt.Config.BalanceMode {
-	case config.IpHash:
-		backend = rt.BackendPool.GetIPHashServer(ip)
-	default:
-		backend = rt.BackendPool.GetLeastConnServer()
-	}
 
+	backend := handleBalanceMode(rt, clientIP)
 	if backend == nil {
 		lb.Logger.Error("no upstream servers available")
 		clientConn.Close()
 		return
 	}
+
 	dialStart := time.Now()
 	backendConn, err := dialer.Dial("tcp", *backend.Address.Load())
 	if err != nil {
@@ -54,19 +45,27 @@ func (lb *LoadBalancer) HandleConn(clientConn net.Conn) {
 		})
 	}
 	defer closeBoth()
-
-	if tcp, ok := backendConn.(*net.TCPConn); ok {
-		tcp.SetNoDelay(true)
-	}
-	if tcp, ok := clientConn.(*net.TCPConn); ok {
-		tcp.SetNoDelay(true)
-	}
+	setNoDelay(backendConn)
+	setNoDelay(clientConn)
 
 	dialTook := time.Since(dialStart)
 
 	var sentBytes, recvBytes atomic.Int64
 	connTimeout := time.Duration(rt.Config.IdleTimeoutMs) * time.Millisecond
-	wg.Go(func() {
+
+	ok := lb.handleProxy(&handleProxyProps{
+		clientConn:     clientConn,
+		backendConn:    backendConn,
+		rt:             rt,
+		backendAddress: backend.Address.Load(),
+		closeBoth:      closeBoth,
+	})
+
+	if !ok {
+		return
+	}
+
+	copyWG.Go(func() {
 		n, err := copyWithIdleTimeout(backendConn, clientConn, *buf1, connTimeout)
 		sentBytes.Add(n)
 
@@ -77,13 +76,11 @@ func (lb *LoadBalancer) HandleConn(clientConn net.Conn) {
 			return
 		}
 
-		if tcp, ok := backendConn.(*net.TCPConn); ok {
-			tcp.CloseWrite()
-		}
+		closeWrite(backendConn)
 
 	})
 
-	wg.Go(func() {
+	copyWG.Go(func() {
 		n, err := copyWithIdleTimeout(clientConn, backendConn, *buf2, connTimeout)
 		recvBytes.Add(n)
 		recvErrKind := classifyConnError(err)
@@ -92,17 +89,15 @@ func (lb *LoadBalancer) HandleConn(clientConn net.Conn) {
 			closeBoth()
 			return
 		}
-		if tcp, ok := clientConn.(*net.TCPConn); ok {
-			tcp.CloseWrite()
+		closeWrite(clientConn)
 
-		}
 	})
 
-	wg.Wait()
+	copyWG.Wait()
 
 	if rt.Config.Debug {
 		lb.Logger.Info("served",
-			slog.String("client", ip),
+			slog.String("client", clientIP),
 			slog.String("server", *backend.Address.Load()),
 			slog.Duration("dial_took", dialTook),
 			slog.Duration("total", time.Since(start)),
@@ -110,6 +105,18 @@ func (lb *LoadBalancer) HandleConn(clientConn net.Conn) {
 			slog.Int64("recv_bytes", recvBytes.Load()),
 			slog.Int64("server_connections", backend.Connections.Load()),
 		)
+	}
+}
+
+func setNoDelay(conn net.Conn) {
+	if tcp, ok := conn.(*net.TCPConn); ok {
+		tcp.SetNoDelay(true)
+	}
+}
+
+func closeWrite(conn net.Conn) {
+	if tcp, ok := conn.(*net.TCPConn); ok {
+		tcp.CloseWrite()
 	}
 }
 

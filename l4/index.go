@@ -21,7 +21,7 @@ var bufPool = sync.Pool{
 type LoadBalancer struct {
 	Quit     chan os.Signal
 	Listener net.Listener
-	Wg       sync.WaitGroup
+	ConnWG   sync.WaitGroup
 	Logger   *slog.Logger
 
 	Runtime atomic.Pointer[config.Runtime]
@@ -41,6 +41,7 @@ func (lb *LoadBalancer) Shutdown() {
 	signal.Stop(lb.Quit)
 	close(lb.Quit)
 	lb.Listener.Close()
+	lb.ConnWG.Wait()
 }
 
 // TODO: implement SO_REUSEPORT for Linux production deployments

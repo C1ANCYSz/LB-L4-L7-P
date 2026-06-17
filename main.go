@@ -36,7 +36,7 @@ func main() {
 	lb := &l4.LoadBalancer{
 		Quit:     quit,
 		Listener: net.Listener(nil),
-		Wg:       sync.WaitGroup{},
+		ConnWG:   sync.WaitGroup{},
 		Logger:   logger,
 	}
 	lb.Runtime.Store(runtime)

@@ -8,13 +8,18 @@
     
     "http://localhost:3001",
     "http://localhost:3000"],
-    "balanceMode":"ipHash",
+    "balanceMode":"leastConnections",
     "level":"TCP/UDP",
     "maxConnections":12000,
     "pingIntervalMs":20000,
     "dnsRefreshIntervalMs":15000,
    
     "debug":false,
-    "idleTimeoutMs":5000
+    "idleTimeoutMs":5000,
+    "tls":"passthrough",
+    "proxyProtocol":{
+      "enabled":false,
+      "version":2
+    }
 
 }
