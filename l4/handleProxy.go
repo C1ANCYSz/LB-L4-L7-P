@@ -32,7 +32,7 @@ func (lb *LoadBalancer) handleProxy(props *handleProxyProps) bool {
 				}
 				header := fmt.Sprintf("PROXY %s %s %s %d %d\r\n", network, clientIP, *props.backendAddress, clientPort, backendPort)
 				if _, err := fmt.Fprint(props.backendConn, header); err != nil {
-					lb.Logger.Error("failed to write proxy protocol header V1", slog.Any("err", err))
+					slog.Error("failed to write proxy protocol header V1", slog.Any("err", err))
 					props.closeBoth()
 					return false
 				}
@@ -47,7 +47,7 @@ func (lb *LoadBalancer) handleProxy(props *handleProxyProps) bool {
 
 				_, err := header.WriteTo(props.backendConn)
 				if err != nil {
-					lb.Logger.Error("failed to write proxy protocol header V2", slog.Any("err", err))
+					slog.Error("failed to write proxy protocol header V2", slog.Any("err", err))
 					props.closeBoth()
 					return false
 

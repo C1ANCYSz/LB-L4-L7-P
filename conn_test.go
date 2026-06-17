@@ -6,9 +6,7 @@ import (
 	config "lb-go/config"
 	"lb-go/l4"
 	"lb-go/resources"
-	"log/slog"
 	"net"
-	"os"
 	"testing"
 )
 
@@ -33,8 +31,6 @@ func TestHandleConn(t *testing.T) {
 		t.Logf("backend done echoing")
 	}()
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-
 	servers := make([]resources.Backend, 1)
 	addr := backend.Addr().String()
 	servers[0].OriginalAddress = addr
@@ -50,9 +46,7 @@ func TestHandleConn(t *testing.T) {
 			Backends: servers,
 		},
 	}
-	lb := &l4.LoadBalancer{
-		Logger: logger,
-	}
+	lb := &l4.LoadBalancer{}
 	lb.Runtime.Store(rt)
 	clientSide, lbSide := tcpPipe(t)
 	t.Logf("client connected, handing to handleConn")

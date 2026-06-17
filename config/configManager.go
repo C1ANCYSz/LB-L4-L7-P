@@ -9,17 +9,16 @@ import (
 )
 
 type ConfigManager struct {
-	Cfg      atomic.Pointer[Config]
-	Logger   *slog.Logger
+	Cfg atomic.Pointer[Config]
+
 	OnReload func(*Config)
 }
 
-func NewConfigManager(cfg *Config, logger *slog.Logger) *ConfigManager {
-	cm := &ConfigManager{
-		Logger: logger,
-	}
+func NewConfigManager(cfg *Config, onReload func(*Config)) *ConfigManager {
+	cm := &ConfigManager{}
 
 	cm.Cfg.Store(cfg)
+	cm.OnReload = onReload
 
 	return cm
 }
@@ -48,7 +47,7 @@ func (cm *ConfigManager) Watch() {
 	defer watcher.Close()
 
 	if err := watcher.Add("config.json"); err != nil {
-		cm.Logger.Error(err.Error())
+		slog.Error(err.Error())
 		return
 	}
 
@@ -71,7 +70,7 @@ func (cm *ConfigManager) Watch() {
 				return
 			}
 
-			cm.Logger.Error(err.Error())
+			slog.Error(err.Error())
 		}
 	}
 }
