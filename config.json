@@ -5,9 +5,18 @@
     "aws-0-eu-west-1.pooler.supabase.com:5432"
 ],
   "backends": [
+    {
+      "address": "http://localhost:3000",
+      "pingEndpoint": "/ping",
+      "maxConnections": 100
+    },
+    {
+      "address": "http://localhost:3001",
+      "pingEndpoint": "/ping",
+      "maxConnections": 100
+    }
     
-    "http://localhost:3001",
-    "http://localhost:3000"],
+],
     "balanceMode":"leastConnections",
     "level":"TCP/UDP",
     "maxConnections":12000,
@@ -20,6 +29,19 @@
     "proxyProtocol":{
       "enabled":true,
       "version":2
-    }
+    },
+    "rateLimitPerMinute":2,
+    "tcpKeepAlive": {
+  "enabled": true,
+  "idleMs": 30000,
+  "intervalMs": 5000,
+  "count": 3
+},
+  "maxConcurrentConnectionsPerIP": 100,
+    "healthCheck": {
+    "intervalMs": 20000,
+    "failureThreshold": 3,
+    "successThreshold": 2
+  }
 
 }

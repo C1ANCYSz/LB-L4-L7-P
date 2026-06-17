@@ -8,9 +8,10 @@ import (
 	"os"
 )
 
-type Backend struct {
-	address      string
-	pingEndpoint string
+type BackendConfig struct {
+	Address      string
+	PingEndpoint string
+	MaxConn      int
 }
 type Config struct {
 	BackendsUrls         []string      `json:"backends"`
@@ -23,6 +24,7 @@ type Config struct {
 	Debug                bool          `json:"debug"`
 	TlsMode              TLSMode       `json:"tls"`
 	ProxyProtocol        ProxyProtocol `json:"proxyProtocol"`
+	RateLimit            int           `json:"rateLimitPerMinute,omitempty"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -50,6 +52,9 @@ func LoadConfig() (*Config, error) {
 	}
 	if config.DNSRefreshIntervalMs == 0 {
 		config.DNSRefreshIntervalMs = 15000 // 15 seconds default
+	}
+	if config.RateLimit == 0 {
+		config.RateLimit = 0
 	}
 	config.logConfig()
 
@@ -96,12 +101,13 @@ func (c Config) logConfig() {
 	row("Idle Timeout (ms)", fmt.Sprint(c.IdleTimeoutMs))
 	row("TLS", string(c.TlsMode))
 	row("Proxy Protocol", proxyStatus)
+	row("Rate Limit", fmt.Sprint(c.RateLimit))
 
 	log.Println("└────────────────────┴────────────────────────────┘")
 
 	log.Println("Backends:")
 	log.Println("┌─────┬────────────────────────────┐")
-	log.Printf("│ %-3s │ %-26s │\n", "#", "Address")
+	log.Printf(" │ %-3s│ %-26s │\n", "#", "Address   │")
 	log.Println("├─────┼────────────────────────────┤")
 
 	for i, backend := range c.BackendsUrls {

@@ -9,6 +9,7 @@ import (
 )
 
 func (lb *LoadBalancer) HandleConn(clientConn net.Conn) {
+
 	rt := lb.Runtime.Load()
 	var copyWG sync.WaitGroup
 	buf1 := bufPool.Get().(*[]byte)
@@ -17,6 +18,18 @@ func (lb *LoadBalancer) HandleConn(clientConn net.Conn) {
 	defer bufPool.Put(buf2)
 
 	clientIP := getClientIP(clientConn.RemoteAddr())
+
+	if !lb.RateLimiter.Load().Allow(clientIP) {
+		if rt.Config.Debug {
+			slog.Warn("rate limited", "ip", clientIP)
+
+		}
+		if tcp, ok := clientConn.(*net.TCPConn); ok {
+			tcp.SetLinger(0)
+		}
+		clientConn.Close()
+		return
+	}
 
 	start := time.Now()
 
@@ -70,6 +83,7 @@ func (lb *LoadBalancer) HandleConn(clientConn net.Conn) {
 
 		sendErrKind := classifyConnError(err)
 		if sendErrKind != ErrKindNone && sendErrKind != ErrKindBenign && sendErrKind != ErrKindCancelled {
+
 			lb.handleConnError("client → backend", err, sendErrKind, backend)
 			closeBoth()
 			return
@@ -84,6 +98,7 @@ func (lb *LoadBalancer) HandleConn(clientConn net.Conn) {
 		recvBytes.Add(n)
 		recvErrKind := classifyConnError(err)
 		if recvErrKind != ErrKindNone && recvErrKind != ErrKindBenign && recvErrKind != ErrKindCancelled {
+
 			lb.handleConnError("backend → client", err, recvErrKind, backend)
 			closeBoth()
 			return
