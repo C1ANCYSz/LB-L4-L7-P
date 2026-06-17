@@ -24,14 +24,14 @@ func (lb *LoadBalancer) Listen(addr string) error {
 		if err != nil {
 			select {
 			case <-lb.Quit:
-				lb.Wg.Wait()
+
 				return nil
 			default:
 				lb.Logger.Error("accept error ", slog.Any("err", err))
 				continue
 			}
 		}
-		lb.Wg.Go(func() {
+		lb.ConnWG.Go(func() {
 
 			lb.HandleConn(conn)
 		})

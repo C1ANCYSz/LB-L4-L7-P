@@ -14,10 +14,28 @@ type Backend struct {
 	Resolving       atomic.Bool
 }
 type BackendPool struct {
-	Backends []Backend
+	Backends     []Backend
+	RobinCounter atomic.Uint64
 }
 
+func (p *BackendPool) GetRoundRobinServer() *Backend {
+	n := uint64(len(p.Backends))
+	if n == 0 {
+		return nil
+	}
+	idx := p.RobinCounter.Add(1)
+	for i := range n {
+		backend := &p.Backends[(idx+i)%n]
+		if backend.Up.Load() {
+			return backend
+		}
+	}
+	return p.GetLeastConnServer()
+}
 func (bPool *BackendPool) GetIPHashServer(ip string) *Backend {
+	if len(bPool.Backends) == 0 {
+		return nil
+	}
 	h := fnv.New32a()
 	h.Write([]byte(ip))
 	idx := int(h.Sum32()) % len(bPool.Backends)
@@ -28,7 +46,9 @@ func (bPool *BackendPool) GetIPHashServer(ip string) *Backend {
 	return bPool.GetLeastConnServer()
 }
 func (bPool *BackendPool) GetLeastConnServer() *Backend {
-
+	if len(bPool.Backends) == 0 {
+		return nil
+	}
 	var backend *Backend
 	for i := range bPool.Backends {
 		s := &bPool.Backends[i]

@@ -10,13 +10,14 @@ import (
 // StartDNSResolver starts a background goroutine that periodically resolves
 // the hostnames of all backends in the current runtime pool.
 func (lb *LoadBalancer) StartDNSResolver(interval time.Duration) {
-	lb.Wg.Go(func() {
+	lb.ConnWG.Go(func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
 		for {
 			select {
 			case <-lb.Quit:
+
 				return
 			case <-ticker.C:
 				lb.ResolveAllBackends()
