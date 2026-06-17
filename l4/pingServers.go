@@ -39,5 +39,5 @@ func (lb *LoadBalancer) PingServers() {
 		}
 	}
 
-	lb.Logger.Info("resources up", attrs...)
+	slog.Info("resources up", attrs...)
 }

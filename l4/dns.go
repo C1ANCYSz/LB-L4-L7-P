@@ -47,7 +47,7 @@ func (lb *LoadBalancer) ResolveBackend(backend *resources.Backend) {
 
 	resolved, err := utils.ResolveHost(backend.OriginalAddress)
 	if err != nil {
-		lb.Logger.Warn("DNS resolution failed",
+		slog.Warn("DNS resolution failed",
 			slog.String("host", backend.OriginalAddress),
 			slog.Any("err", err),
 		)
@@ -57,7 +57,7 @@ func (lb *LoadBalancer) ResolveBackend(backend *resources.Backend) {
 	oldAddrPtr := backend.Address.Load()
 	if oldAddrPtr == nil || *oldAddrPtr != resolved {
 		backend.Address.Store(&resolved)
-		lb.Logger.Info("DNS resolved",
+		slog.Info("DNS resolved",
 			slog.String("original", backend.OriginalAddress),
 			slog.String("resolved", resolved),
 		)

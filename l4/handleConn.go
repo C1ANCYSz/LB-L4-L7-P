@@ -22,7 +22,7 @@ func (lb *LoadBalancer) HandleConn(clientConn net.Conn) {
 
 	backend := handleBalanceMode(rt, clientIP)
 	if backend == nil {
-		lb.Logger.Error("no upstream servers available")
+		slog.Error("no upstream servers available")
 		clientConn.Close()
 		return
 	}
@@ -30,7 +30,7 @@ func (lb *LoadBalancer) HandleConn(clientConn net.Conn) {
 	dialStart := time.Now()
 	backendConn, err := dialer.Dial("tcp", *backend.Address.Load())
 	if err != nil {
-		lb.Logger.Error("dial error", slog.Any("err", err))
+		slog.Error("dial error", slog.Any("err", err))
 		clientConn.Close()
 		return
 	}
@@ -96,7 +96,7 @@ func (lb *LoadBalancer) HandleConn(clientConn net.Conn) {
 	copyWG.Wait()
 
 	if rt.Config.Debug {
-		lb.Logger.Info("served",
+		slog.Info("served",
 			slog.String("client", clientIP),
 			slog.String("server", *backend.Address.Load()),
 			slog.Duration("dial_took", dialTook),

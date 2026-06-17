@@ -27,7 +27,7 @@ func (lb *LoadBalancer) Listen(addr string) error {
 
 				return nil
 			default:
-				lb.Logger.Error("accept error ", slog.Any("err", err))
+				slog.Error("accept error ", slog.Any("err", err))
 				continue
 			}
 		}

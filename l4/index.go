@@ -2,7 +2,6 @@ package l4
 
 import (
 	"lb-go/config"
-	"log/slog"
 	"net"
 	"os"
 	"os/signal"
@@ -22,7 +21,6 @@ type LoadBalancer struct {
 	Quit     chan os.Signal
 	Listener net.Listener
 	ConnWG   sync.WaitGroup
-	Logger   *slog.Logger
 
 	Runtime atomic.Pointer[config.Runtime]
 }

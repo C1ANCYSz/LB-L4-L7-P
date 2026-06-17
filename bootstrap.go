@@ -7,10 +7,12 @@ import (
 	"syscall"
 )
 
-func CreateLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+func InitLogger() {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
+	slog.SetDefault(logger)
+
 }
 
 func GracefulShutdownChan() chan os.Signal {
