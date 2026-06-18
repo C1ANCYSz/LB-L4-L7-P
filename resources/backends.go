@@ -5,13 +5,19 @@ import (
 	"sync/atomic"
 )
 
+type ConfigBackend struct {
+	Address string
+	MaxConn int
+}
+
 type Backend struct {
-	Up              atomic.Bool
-	OriginalAddress string
-	Address         atomic.Pointer[string]
-	PingEndpoint    string
-	Connections     atomic.Int64
-	Resolving       atomic.Bool
+	Up                  atomic.Bool
+	OriginalAddress     string
+	Address             atomic.Pointer[string]
+	Connections         atomic.Int64
+	Resolving           atomic.Bool
+	ConsecutiveFailures atomic.Int32
+	ConsecutiveSuccess  atomic.Int32
 }
 type BackendPool struct {
 	Backends     []Backend
@@ -63,12 +69,12 @@ func (bPool *BackendPool) GetLeastConnServer() *Backend {
 	return backend
 }
 
-func NewBackendPool(backendsUrls []string) *BackendPool {
+func NewBackendPool(backendsUrls []ConfigBackend) *BackendPool {
 	backends := make([]Backend, len(backendsUrls))
 
-	for i, url := range backendsUrls {
-		backends[i].OriginalAddress = url
-		u := url
+	for i, backend := range backendsUrls {
+		backends[i].OriginalAddress = backend.Address
+		u := backend.Address
 		backends[i].Address.Store(&u)
 		backends[i].Up.Store(false)
 	}

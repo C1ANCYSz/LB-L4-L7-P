@@ -2,6 +2,8 @@ package l4
 
 import (
 	"lb-go/config"
+	"lb-go/infra"
+	"log/slog"
 	"net"
 	"os"
 	"os/signal"
@@ -18,11 +20,11 @@ var bufPool = sync.Pool{
 }
 
 type LoadBalancer struct {
-	Quit     chan os.Signal
-	Listener net.Listener
-	ConnWG   sync.WaitGroup
-
-	Runtime atomic.Pointer[config.Runtime]
+	Quit        chan os.Signal
+	Listener    net.Listener
+	ConnWG      sync.WaitGroup
+	RateLimiter atomic.Pointer[infra.RateLimiter]
+	Runtime     atomic.Pointer[config.Runtime]
 }
 
 var dialer = &net.Dialer{
@@ -31,8 +33,17 @@ var dialer = &net.Dialer{
 }
 
 func (lb *LoadBalancer) Reload(cfg *config.Config) {
-	newRt := config.NewRuntime(cfg)
-	lb.Runtime.Store(newRt)
+
+	lb.Runtime.Store(config.NewRuntime(cfg))
+	if rl := lb.RateLimiter.Load(); rl != nil {
+		rl.Update(cfg.RateLimit)
+	}
+	slog.Info(
+		"configuration reloaded",
+		"balance_mode", cfg.BalanceMode,
+		"rate_limit", cfg.RateLimit,
+	)
+
 }
 
 func (lb *LoadBalancer) Shutdown() {

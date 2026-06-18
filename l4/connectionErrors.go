@@ -21,7 +21,13 @@ const (
 	ErrKindExhausted                      // fd limit, too many open files
 	ErrKindCancelled                      // cancelled by the context in handleConn()
 	ErrKindUnknown                        // unknown errs
+	ErrKindDialTimeout
+	ErrKindReadTimeout
+	ErrKindWriteTimeout
+	ErrKindIdleTimeout
 )
+
+var ErrIdleTimeout = errors.New("idle timeout")
 
 func (k ConnErrKind) String() string {
 	switch k {
@@ -39,14 +45,21 @@ func (k ConnErrKind) String() string {
 		return "exhausted"
 	case ErrKindCancelled:
 		return "cancelled"
+	case ErrKindIdleTimeout:
+		return "idle timeout"
+
 	default:
 		return "unknown"
 	}
 }
 
 func classifyConnError(err error) ConnErrKind {
+
 	if err == nil {
 		return ErrKindNone
+	}
+	if errors.Is(err, ErrIdleTimeout) {
+		return ErrKindIdleTimeout
 	}
 
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

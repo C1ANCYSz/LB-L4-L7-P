@@ -2,6 +2,7 @@ package main
 
 import (
 	config "lb-go/config"
+	"lb-go/infra"
 	"lb-go/l4"
 	"log"
 	"net"
@@ -30,16 +31,24 @@ func main() {
 
 	configManager := config.NewConfigManager(cfg, func(cfg *config.Config) {
 		lb.Reload(cfg)
-		lb.ResolveAllBackends()
-		lb.PingServers()
+		go lb.ResolveAllBackends()
+		go lb.PingServers()
+
 	})
+	rl := infra.NewRateLimiter(configManager.Get().RateLimit)
+	runtime := config.NewRuntime(cfg)
+
+	lb.RateLimiter.Store(rl)
+	lb.Runtime.Store(runtime)
 
 	go configManager.Watch()
 
-	runtime := config.NewRuntime(cfg)
-	lb.Runtime.Store(runtime)
+	pingTicker := time.NewTicker(time.Duration(configManager.Get().HealthCheck.IntervalMs) * time.Millisecond)
+	rateLimitCleanupTicker := time.NewTicker(time.Duration(time.Hour * 6))
+	connectionsLogTicker := time.NewTicker(time.Duration(time.Second * 3))
 
-	pingTicker := time.NewTicker(time.Duration(configManager.Get().PingIntervalMs) * time.Millisecond)
+	go rl.Cleanup(rateLimitCleanupTicker)
+
 	defer pingTicker.Stop()
 
 	//for keeping track of goroutines
@@ -67,10 +76,17 @@ func main() {
 
 		case <-pingTicker.C:
 			{
-				lb.PingServers()
+				go lb.PingServers()
 
-				newInterval := time.Duration(configManager.Get().PingIntervalMs) * time.Millisecond
+				newInterval := time.Duration(configManager.Get().HealthCheck.IntervalMs) * time.Millisecond
 				pingTicker.Reset(newInterval)
+			}
+		case <-connectionsLogTicker.C:
+			{
+				for i := range lb.Runtime.Load().BackendPool.Backends {
+					backend := &lb.Runtime.Load().BackendPool.Backends[i]
+					log.Printf("Backend %s has %d connections", *backend.Address.Load(), backend.Connections.Load())
+				}
 			}
 
 		}

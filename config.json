@@ -1,25 +1,45 @@
 {
-  "IGNORE":[
-    "www.google.com:80",
- 
-    "aws-0-eu-west-1.pooler.supabase.com:5432"
-],
+  "IGNORE": ["www.google.com:80", "aws-0-eu-west-1.pooler.supabase.com:5432"],
   "backends": [
-    
-    "http://localhost:3001",
-    "http://localhost:3000"],
-    "balanceMode":"leastConnections",
-    "level":"TCP/UDP",
-    "maxConnections":12000,
-    "pingIntervalMs":20000,
-    "dnsRefreshIntervalMs":15000,
-   
-    "debug":false,
-    "idleTimeoutMs":5000,
-    "tls":"passthrough",
-    "proxyProtocol":{
-      "enabled":true,
-      "version":2
+    {
+      "address": "http://localhost:3000",
+      "maxConnections": 100
+    },
+    {
+      "address": "http://localhost:3001",
+      "maxConnections": 100
     }
+  ],
+  "balanceMode": "leastConnections",
 
+  "maxConnections": 120000,
+
+  "maxConcurrentConnectionsPerIP": 100,
+
+  "connectionRateLimitPerMinute": 1000000,
+
+  "idleTimeoutMs": 5000,
+
+  "dnsRefreshIntervalMs": 15000,
+
+  "tls": "passthrough",
+
+  "proxyProtocol": {
+    "enabled": false,
+    "version": 2
+  },
+
+  "tcpKeepAlive": {
+    "enabled": true,
+    "idleMs": 30000,
+    "intervalMs": 5000,
+    "count": 3
+  },
+
+  "healthCheck": {
+    "intervalMs": 5000,
+    "failureThreshold": 3,
+    "successThreshold": 1
+  },
+  "debug": false
 }

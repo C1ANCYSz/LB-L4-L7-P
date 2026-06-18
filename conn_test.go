@@ -36,11 +36,11 @@ func TestHandleConn(t *testing.T) {
 	servers[0].OriginalAddress = addr
 	servers[0].Address.Store(&addr)
 	servers[0].Up.Store(true)
-
+	timeout := 200
 	rt := &config.Runtime{
 		Config: &config.Config{
 			BalanceMode:   config.LeastConn,
-			IdleTimeoutMs: 200,
+			IdleTimeoutMs: &timeout,
 		},
 		BackendPool: &resources.BackendPool{
 			Backends: servers,
