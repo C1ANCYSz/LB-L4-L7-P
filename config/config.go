@@ -4,27 +4,29 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"lb-go/resources"
 	"log"
 	"os"
 )
 
-type BackendConfig struct {
-	Address      string
-	PingEndpoint string
-	MaxConn      int
+type HealthCheck struct {
+	IntervalMs       int `json:"intervalMs"`
+	FailureThreshold int `json:"failureThreshold"`
+	SuccessThreshold int `json:"successThreshold"`
 }
 type Config struct {
-	BackendsUrls         []string      `json:"backends"`
-	BalanceMode          BalanceMode   `json:"balanceMode"`
-	LBLevel              LBLevel       `json:"level"`
-	MaxConn              int           `json:"maxConnections"`
-	IdleTimeoutMs        int           `json:"idleTimeoutMs"`
-	PingIntervalMs       int           `json:"pingIntervalMs"`
-	DNSRefreshIntervalMs int           `json:"dnsRefreshIntervalMs,omitempty"`
-	Debug                bool          `json:"debug"`
-	TlsMode              TLSMode       `json:"tls"`
-	ProxyProtocol        ProxyProtocol `json:"proxyProtocol"`
-	RateLimit            int           `json:"rateLimitPerMinute,omitempty"`
+	ConfigBackends                []resources.ConfigBackend `json:"backends"`
+	BalanceMode                   BalanceMode               `json:"balanceMode"`
+	MaxConn                       int                       `json:"maxConnections"`
+	MaxConcurrentConnectionsPerIP int                       `json:"maxConcurrentConnectionsPerIP"`
+	RateLimit                     int                       `json:"connectionRateLimitPerMinute,omitempty"`
+	IdleTimeoutMs                 *int                      `json:"idleTimeoutMs"`
+	DNSRefreshIntervalMs          int                       `json:"dnsRefreshIntervalMs,omitempty"`
+	TlsMode                       TLSMode                   `json:"tls"`
+	ProxyProtocol                 ProxyProtocol             `json:"proxyProtocol"`
+	HealthCheck                   HealthCheck               `json:"healthCheck"`
+	TcpKeepAlive                  *TcpKeepAlive             `json:"tcpKeepAlive"`
+	Debug                         bool                      `json:"debug"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -53,6 +55,11 @@ func LoadConfig() (*Config, error) {
 	if config.DNSRefreshIntervalMs == 0 {
 		config.DNSRefreshIntervalMs = 15000 // 15 seconds default
 	}
+	err = config.TcpKeepAlive.Validate()
+	if err != nil {
+		return nil, err
+	}
+
 	if config.RateLimit == 0 {
 		config.RateLimit = 0
 	}
@@ -66,15 +73,11 @@ func (c Config) validateConfig() error {
 	if !c.BalanceMode.Validate() {
 		return errors.New("invalid balance mode")
 	}
-	if !c.LBLevel.Validate() {
-		return errors.New("Invalid LB Level")
-	}
+
 	if c.MaxConn == 0 {
 		return errors.New("Please specify max connections")
 	}
-	if c.PingIntervalMs == 0 {
-		return errors.New("Please specify ping interval")
-	}
+
 	return nil
 }
 
@@ -94,13 +97,41 @@ func (c Config) logConfig() {
 	log.Println("├────────────────────┼────────────────────────────┤")
 
 	row("Balance Mode", string(c.BalanceMode))
-	row("LB Level", fmt.Sprint(c.LBLevel))
 	row("Max Connections", fmt.Sprint(c.MaxConn))
 	row("Debug", fmt.Sprintf("%t", c.Debug))
-	row("Ping Interval (ms)", fmt.Sprint(c.PingIntervalMs))
-	row("Idle Timeout (ms)", fmt.Sprint(c.IdleTimeoutMs))
+	if c.IdleTimeoutMs == nil {
+		row("Idle Timeout (ms)", "disabled")
+	} else {
+		row("Idle Timeout (ms)", fmt.Sprint(*c.IdleTimeoutMs))
+	}
 	row("TLS", string(c.TlsMode))
 	row("Proxy Protocol", proxyStatus)
+	if c.TcpKeepAlive == nil {
+		row("Keep Alive", "disabled")
+	} else {
+		idle := "default"
+		if c.TcpKeepAlive.IdleMs == 0 {
+			idle = fmt.Sprintf("%dms", c.TcpKeepAlive.IdleMs)
+		}
+
+		interval := "default"
+		if c.TcpKeepAlive.IntervalMs == 0 {
+			interval = fmt.Sprintf("%dms", c.TcpKeepAlive.IntervalMs)
+		}
+
+		count := "default"
+		if c.TcpKeepAlive.Count == 0 {
+			count = fmt.Sprintf("%d", c.TcpKeepAlive.Count)
+		}
+
+		row("Keep Alive", fmt.Sprintf(
+			"enabled: %v idle: %s interval: %s count: %s",
+			c.TcpKeepAlive.Enabled,
+			idle,
+			interval,
+			count,
+		))
+	}
 	row("Rate Limit", fmt.Sprint(c.RateLimit))
 
 	log.Println("└────────────────────┴────────────────────────────┘")
@@ -110,8 +141,8 @@ func (c Config) logConfig() {
 	log.Printf(" │ %-3s│ %-26s │\n", "#", "Address   │")
 	log.Println("├─────┼────────────────────────────┤")
 
-	for i, backend := range c.BackendsUrls {
-		log.Printf("│ %-3d │ %-26s │\n", i+1, backend)
+	for i, backend := range c.ConfigBackends {
+		log.Printf("│ %-3d │ %-26s │\n", i+1, backend.Address)
 	}
 
 	log.Println("└─────┴────────────────────────────┘")

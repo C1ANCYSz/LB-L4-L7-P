@@ -31,8 +31,8 @@ func main() {
 
 	configManager := config.NewConfigManager(cfg, func(cfg *config.Config) {
 		lb.Reload(cfg)
-		lb.ResolveAllBackends()
-		lb.PingServers()
+		go lb.ResolveAllBackends()
+		go lb.PingServers()
 
 	})
 	rl := infra.NewRateLimiter(configManager.Get().RateLimit)
@@ -43,8 +43,9 @@ func main() {
 
 	go configManager.Watch()
 
-	pingTicker := time.NewTicker(time.Duration(configManager.Get().PingIntervalMs) * time.Millisecond)
-	rateLimitCleanupTicker := time.NewTicker(time.Duration(time.Second * 10))
+	pingTicker := time.NewTicker(time.Duration(configManager.Get().HealthCheck.IntervalMs) * time.Millisecond)
+	rateLimitCleanupTicker := time.NewTicker(time.Duration(time.Hour * 6))
+	connectionsLogTicker := time.NewTicker(time.Duration(time.Second * 3))
 
 	go rl.Cleanup(rateLimitCleanupTicker)
 
@@ -75,10 +76,17 @@ func main() {
 
 		case <-pingTicker.C:
 			{
-				lb.PingServers()
+				go lb.PingServers()
 
-				newInterval := time.Duration(configManager.Get().PingIntervalMs) * time.Millisecond
+				newInterval := time.Duration(configManager.Get().HealthCheck.IntervalMs) * time.Millisecond
 				pingTicker.Reset(newInterval)
+			}
+		case <-connectionsLogTicker.C:
+			{
+				for i := range lb.Runtime.Load().BackendPool.Backends {
+					backend := &lb.Runtime.Load().BackendPool.Backends[i]
+					log.Printf("Backend %s has %d connections", *backend.Address.Load(), backend.Connections.Load())
+				}
 			}
 
 		}

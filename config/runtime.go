@@ -1,6 +1,8 @@
 package config
 
-import "lb-go/resources"
+import (
+	"lb-go/resources"
+)
 
 type Runtime struct {
 	Config      *Config
@@ -10,6 +12,6 @@ type Runtime struct {
 func NewRuntime(cfg *Config) *Runtime {
 	return &Runtime{
 		Config:      cfg,
-		BackendPool: resources.NewBackendPool(cfg.BackendsUrls),
+		BackendPool: resources.NewBackendPool(cfg.ConfigBackends),
 	}
 }

@@ -11,18 +11,30 @@ func (lb *LoadBalancer) PingServers() {
 	var up int
 	rt := lb.Runtime.Load()
 	for idx := range rt.BackendPool.Backends {
+
 		backend := &rt.BackendPool.Backends[idx]
-		pingEndpoint := *backend.Address.Load() + backend.PingEndpoint
-		conn, err := net.DialTimeout("tcp", pingEndpoint, 2*time.Second)
+
+		conn, err := net.DialTimeout("tcp", *backend.Address.Load(), 2*time.Second)
 		if err != nil {
-			backend.Up.Store(false)
+			failures := backend.ConsecutiveFailures.Add(1)
+			backend.ConsecutiveSuccess.Store(0)
+
+			if failures >= int32(rt.Config.HealthCheck.FailureThreshold) {
+				backend.Up.Store(false)
+			}
+
 			continue
 		}
 		if tcp, ok := conn.(*net.TCPConn); ok {
 			tcp.SetNoDelay(true)
 		}
 		conn.Close()
-		backend.Up.Store(true)
+		success := backend.ConsecutiveSuccess.Add(1)
+		backend.ConsecutiveFailures.Store(0)
+
+		if success >= int32(rt.Config.HealthCheck.SuccessThreshold) {
+			backend.Up.Store(true)
+		}
 		up++
 	}
 
