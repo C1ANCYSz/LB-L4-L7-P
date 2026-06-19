@@ -9,9 +9,56 @@ import (
 	"time"
 )
 
-func (lb *LoadBalancer) HandleConn(clientConn net.Conn, clientIP string) {
+var rejects atomic.Int64
 
+func (lb *LoadBalancer) acquireIPSlot(clientIP string, limit int64) (*atomic.Int64, bool) {
+	if limit <= 0 {
+		return nil, true
+	}
+	v, _ := lb.IPConnections.LoadOrStore(clientIP, &atomic.Int64{})
+	counter := v.(*atomic.Int64)
+
+	if counter.Add(1) > limit {
+		counter.Add(-1)
+
+		return nil, false
+	}
+
+	return counter, true
+}
+func (lb *LoadBalancer) HandleConn(clientConn net.Conn, clientIP string) {
 	rt := lb.Runtime.Load()
+	limit := int64(rt.Config.MaxConcurrentConnectionsPerIP)
+
+	counter, ok := lb.acquireIPSlot(clientIP, limit)
+
+	if !ok {
+		rejects.Add(1)
+
+		if rejects.Load()%1000 == 0 {
+			slog.Info("rejects", "count", rejects.Load())
+		}
+
+		if tcp, ok := unwrapConn(clientConn).(*net.TCPConn); ok {
+			tcp.SetLinger(0)
+		}
+		// slog.Info(
+		// 	"ip limit exceeded",
+		// 	"ip", clientIP,
+		// 	"current", counter,
+		// 	"limit", limit,
+		// )
+		clientConn.Close()
+		return
+	}
+
+	if counter != nil {
+		defer func() {
+			if counter.Add(-1) == 0 {
+				lb.IPConnections.Delete(clientIP)
+			}
+		}()
+	}
 
 	var closeOnce sync.Once
 
@@ -79,7 +126,7 @@ func (lb *LoadBalancer) HandleConn(clientConn net.Conn, clientIP string) {
 		idleTimeout = &d
 	}
 
-	ok := lb.handleProxy(&handleProxyProps{
+	ok = lb.handleProxy(&handleProxyProps{
 		clientConn:  clientConn,
 		backendConn: backendConn,
 		rt:          rt,

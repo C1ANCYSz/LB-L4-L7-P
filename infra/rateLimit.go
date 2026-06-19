@@ -3,7 +3,6 @@ package infra
 import (
 	"log/slog"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -15,8 +14,8 @@ type RateLimiter struct {
 	burst   int
 }
 type ClientLimiter struct {
-	Limiter  *rate.Limiter
-	LastSeen atomic.Int64
+	Limiter *rate.Limiter
+	// LastSeen atomic.Int64
 }
 
 func NewRateLimiter(limitPerMinute int) *RateLimiter {
@@ -55,14 +54,14 @@ func (rl *RateLimiter) Update(limitPerMinute int) {
 func (rl *RateLimiter) Get(ip string) *rate.Limiter {
 	if v, ok := rl.clients.Load(ip); ok {
 		client := v.(*ClientLimiter)
-		client.LastSeen.Store(time.Now().Unix())
+		// client.LastSeen.Store(time.Now().Unix())
 		return client.Limiter
 	}
 
 	client := &ClientLimiter{
 		Limiter: rate.NewLimiter(rl.rate, rl.burst),
 	}
-	client.LastSeen.Store(time.Now().Unix())
+	// client.LastSeen.Store(time.Now().Unix())
 
 	actual, _ := rl.clients.LoadOrStore(ip, client)
 
@@ -81,12 +80,12 @@ func (rl *RateLimiter) Cleanup(ticker *time.Ticker) {
 		rl.clients.Range(func(key, value any) bool {
 			before++
 
-			client := value.(*ClientLimiter)
+			// client := value.(*ClientLimiter)
 
-			if time.Since(time.Unix(client.LastSeen.Load(), 0)) > time.Second*5 {
-				rl.clients.Delete(key)
-				deleted++
-			}
+			// if time.Since(time.Unix(client.LastSeen.Load(), 0)) > time.Second*5 {
+			rl.clients.Delete(key)
+			deleted++
+			// }
 
 			return true
 		})

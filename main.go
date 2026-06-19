@@ -32,7 +32,7 @@ func main() {
 	configManager := config.NewConfigManager(cfg, func(cfg *config.Config) {
 		lb.Reload(cfg)
 		go lb.ResolveAllBackends()
-		go lb.PingServers()
+		go lb.HealthCheck()
 
 	})
 	rl := infra.NewRateLimiter(configManager.Get().RateLimit)
@@ -58,7 +58,7 @@ func main() {
 
 	lb.ResolveAllBackends()
 	lb.StartDNSResolver(time.Duration(configManager.Get().DNSRefreshIntervalMs) * time.Millisecond)
-	lb.PingServers()
+	lb.HealthCheck()
 
 	go func() {
 		if err := lb.ListenReusePort(":8080"); err != nil {
@@ -76,7 +76,7 @@ func main() {
 
 		case <-pingTicker.C:
 			{
-				go lb.PingServers()
+				go lb.HealthCheck()
 
 				newInterval := time.Duration(configManager.Get().HealthCheck.IntervalMs) * time.Millisecond
 				pingTicker.Reset(newInterval)

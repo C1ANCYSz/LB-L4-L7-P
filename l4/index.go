@@ -20,11 +20,12 @@ var bufPool = sync.Pool{
 }
 
 type LoadBalancer struct {
-	Quit        chan os.Signal
-	Listener    net.Listener
-	ConnWG      sync.WaitGroup
-	RateLimiter atomic.Pointer[infra.RateLimiter]
-	Runtime     atomic.Pointer[config.Runtime]
+	Quit          chan os.Signal
+	Listener      net.Listener
+	ConnWG        sync.WaitGroup
+	RateLimiter   atomic.Pointer[infra.RateLimiter]
+	Runtime       atomic.Pointer[config.Runtime]
+	IPConnections sync.Map
 }
 
 var dialer = &net.Dialer{
@@ -45,7 +46,9 @@ func (lb *LoadBalancer) Reload(cfg *config.Config) {
 func (lb *LoadBalancer) Shutdown() {
 	signal.Stop(lb.Quit)
 	close(lb.Quit)
-	lb.Listener.Close()
+	if lb.Listener != nil {
+		lb.Listener.Close()
+	}
 	lb.ConnWG.Wait()
 }
 

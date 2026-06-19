@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func (lb *LoadBalancer) PingServers() {
+func (lb *LoadBalancer) HealthCheck() {
 	var up int
 	rt := lb.Runtime.Load()
 	for idx := range rt.BackendPool.Backends {
