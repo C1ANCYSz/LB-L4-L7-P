@@ -8,7 +8,6 @@ import (
 )
 
 func (lb *LoadBalancer) Listen(addr string) error {
-	//init listener on tcp
 
 	rt := lb.Runtime.Load()
 
@@ -17,12 +16,13 @@ func (lb *LoadBalancer) Listen(addr string) error {
 		return err
 	}
 
-	//limit listener to 10K concurrent listeners to avoid go routines leaks
 	lb.Listener = netutil.LimitListener(listener, int(rt.Config.MaxConn))
 	defer lb.Listener.Close()
 
 	for {
+
 		clientConn, err := lb.Listener.Accept()
+
 		if err != nil {
 			select {
 			case <-lb.Quit:
@@ -33,13 +33,37 @@ func (lb *LoadBalancer) Listen(addr string) error {
 				continue
 			}
 		}
-		if rt.Config.TcpKeepAlive != nil {
-			lb.ConfigureKeepAlive(clientConn)
-		}
-		lb.ConnWG.Go(func() {
 
-			lb.HandleConn(clientConn)
+		clientIP := GetClientIP(clientConn.RemoteAddr())
+		if !lb.RateLimiter.Load().Allow(clientIP) {
+
+			if tcp, ok := unwrapConn(clientConn).(*net.TCPConn); ok {
+				tcp.SetLinger(0)
+			}
+			clientConn.Close()
+			continue
+		}
+
+		lb.ConnWG.Go(func() {
+			lb.HandleConn(clientConn, clientIP)
 		})
 
 	}
+}
+func GetClientIP(addr net.Addr) string {
+	if addr == nil {
+		return ""
+	}
+	switch a := addr.(type) {
+	case *net.TCPAddr:
+		return a.IP.String()
+	case *net.UDPAddr:
+		return a.IP.String()
+	}
+	// Fallback for mock/pipe/unix domain socket addresses
+	str := addr.String()
+	if host, _, err := net.SplitHostPort(str); err == nil {
+		return host
+	}
+	return str
 }

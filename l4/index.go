@@ -3,10 +3,10 @@ package l4
 import (
 	"lb-go/config"
 	"lb-go/infra"
-	"log/slog"
 	"net"
 	"os"
 	"os/signal"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -38,11 +38,7 @@ func (lb *LoadBalancer) Reload(cfg *config.Config) {
 	if rl := lb.RateLimiter.Load(); rl != nil {
 		rl.Update(cfg.RateLimit)
 	}
-	slog.Info(
-		"configuration reloaded",
-		"balance_mode", cfg.BalanceMode,
-		"rate_limit", cfg.RateLimit,
-	)
+	cfg.LogConfig()
 
 }
 
@@ -53,9 +49,25 @@ func (lb *LoadBalancer) Shutdown() {
 	lb.ConnWG.Wait()
 }
 
-// TODO: implement SO_REUSEPORT for Linux production deployments
-// Use build tags: //go:build linux
-// Spawn runtime.NumCPU() listeners for parallel accept() loops
-func (lb *LoadBalancer) ListenReusePort(addr string) error {
-	return nil
+func unwrapConn(conn net.Conn) net.Conn {
+	rawConn := conn
+	for {
+		val := reflect.ValueOf(rawConn)
+		if val.Kind() == reflect.Pointer {
+			val = val.Elem()
+		}
+		if val.Kind() != reflect.Struct {
+			break
+		}
+		field := val.FieldByName("Conn")
+		if !field.IsValid() {
+			break
+		}
+		if nextConn, ok := field.Interface().(net.Conn); ok {
+			rawConn = nextConn
+		} else {
+			break
+		}
+	}
+	return rawConn
 }

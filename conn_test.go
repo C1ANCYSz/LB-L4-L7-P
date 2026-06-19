@@ -36,6 +36,7 @@ func TestHandleConn(t *testing.T) {
 	servers[0].OriginalAddress = addr
 	servers[0].Address.Store(&addr)
 	servers[0].Up.Store(true)
+	servers[0].MaxConn.Store(1)
 	timeout := 200
 	rt := &config.Runtime{
 		Config: &config.Config{
@@ -50,8 +51,8 @@ func TestHandleConn(t *testing.T) {
 	lb.Runtime.Store(rt)
 	clientSide, lbSide := tcpPipe(t)
 	t.Logf("client connected, handing to handleConn")
-
-	go lb.HandleConn(lbSide)
+	clientIP := l4.GetClientIP(clientSide.RemoteAddr())
+	go lb.HandleConn(lbSide, clientIP)
 
 	msg := []byte("hello backend")
 	t.Logf("client sending: %q", msg)

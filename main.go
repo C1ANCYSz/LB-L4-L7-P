@@ -61,7 +61,7 @@ func main() {
 	lb.PingServers()
 
 	go func() {
-		if err := lb.Listen(":8080"); err != nil {
+		if err := lb.ListenReusePort(":8080"); err != nil {
 			log.Fatal(err)
 		}
 	}()

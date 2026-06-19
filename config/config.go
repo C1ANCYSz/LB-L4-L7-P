@@ -63,7 +63,7 @@ func LoadConfig() (*Config, error) {
 	if config.RateLimit == 0 {
 		config.RateLimit = 0
 	}
-	config.logConfig()
+	config.LogConfig()
 
 	return config, nil
 
@@ -81,7 +81,7 @@ func (c Config) validateConfig() error {
 	return nil
 }
 
-func (c Config) logConfig() {
+func (c Config) LogConfig() {
 	var proxyStatus string
 	if c.ProxyProtocol.Enabled {
 		proxyStatus = "V" + fmt.Sprint(*c.ProxyProtocol.Version)
@@ -142,7 +142,7 @@ func (c Config) logConfig() {
 	log.Println("├─────┼────────────────────────────┤")
 
 	for i, backend := range c.ConfigBackends {
-		log.Printf("│ %-3d │ %-26s │\n", i+1, backend.Address)
+		log.Printf("│ %-3d │ %-26s │\n", i+1, fmt.Sprintf(" %s %d", backend.Address, backend.MaxConn))
 	}
 
 	log.Println("└─────┴────────────────────────────┘")

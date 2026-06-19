@@ -1,6 +1,7 @@
 package l4
 
 import (
+	"lb-go/config"
 	"log/slog"
 	"net"
 	"sync"
@@ -8,31 +9,18 @@ import (
 	"time"
 )
 
-func (lb *LoadBalancer) HandleConn(clientConn net.Conn) {
+func (lb *LoadBalancer) HandleConn(clientConn net.Conn, clientIP string) {
+
+	rt := lb.Runtime.Load()
 
 	var closeOnce sync.Once
 
-	rt := lb.Runtime.Load()
 	var copyWG sync.WaitGroup
+
 	buf1 := bufPool.Get().(*[]byte)
 	buf2 := bufPool.Get().(*[]byte)
 	defer bufPool.Put(buf1)
 	defer bufPool.Put(buf2)
-	clientIP := getClientIP(clientConn.RemoteAddr())
-
-	// if !lb.RateLimiter.Load().Allow(clientIP) {
-	// 	if rt.Config.Debug {
-	// 		slog.Warn("rate limited", "ip", clientIP)
-
-	// 	}
-	// 	if tcp, ok := clientConn.(*net.TCPConn); ok {
-	// 		tcp.SetLinger(0)
-	// 	}
-	// 	clientConn.Close()
-	// 	return
-	// }
-
-	start := time.Now()
 
 	backend := handleBalanceMode(rt, clientIP)
 	if backend == nil {
@@ -41,7 +29,25 @@ func (lb *LoadBalancer) HandleConn(clientConn net.Conn) {
 		return
 	}
 
+	if rt.Config.TcpKeepAlive != nil {
+		lb.ConfigureKeepAlive(clientConn, rt)
+	}
+
+	start := time.Now()
 	dialStart := time.Now()
+
+	newConnVal := backend.Connections.Add(1)
+
+	if newConnVal > int64(backend.MaxConn.Load()) {
+		backend.Connections.Add(-1)
+		if tcp, ok := unwrapConn(clientConn).(*net.TCPConn); ok {
+			tcp.SetLinger(0)
+		}
+		clientConn.Close()
+		return
+	}
+	defer backend.Connections.Add(-1)
+
 	backendConn, err := dialer.Dial("tcp", *backend.Address.Load())
 	if err != nil {
 		slog.Error("dial error", slog.Any("err", err))
@@ -49,10 +55,8 @@ func (lb *LoadBalancer) HandleConn(clientConn net.Conn) {
 		return
 	}
 	if rt.Config.TcpKeepAlive != nil {
-		lb.ConfigureKeepAlive(backendConn)
+		lb.ConfigureKeepAlive(backendConn, rt)
 	}
-	backend.Connections.Add(1)
-	defer backend.Connections.Add(-1)
 
 	closeBoth := func() {
 		closeOnce.Do(func() {
@@ -61,12 +65,14 @@ func (lb *LoadBalancer) HandleConn(clientConn net.Conn) {
 		})
 	}
 	defer closeBoth()
+
 	setNoDelay(backendConn)
 	setNoDelay(clientConn)
 
 	dialTook := time.Since(dialStart)
 
 	var sentBytes, recvBytes atomic.Int64
+
 	var idleTimeout *time.Duration
 	if rt.Config.IdleTimeoutMs != nil {
 		d := time.Duration(*rt.Config.IdleTimeoutMs) * time.Millisecond
@@ -103,6 +109,7 @@ func (lb *LoadBalancer) HandleConn(clientConn net.Conn) {
 	copyWG.Go(func() {
 		n, err := copyWithIdleTimeout(clientConn, backendConn, *buf2, idleTimeout)
 		recvBytes.Add(n)
+
 		recvErrKind := classifyConnError(err)
 		if recvErrKind != ErrKindNone && recvErrKind != ErrKindBenign && recvErrKind != ErrKindCancelled {
 
@@ -111,6 +118,7 @@ func (lb *LoadBalancer) HandleConn(clientConn net.Conn) {
 			return
 		}
 		closeWrite(clientConn)
+		closeBoth()
 
 	})
 
@@ -130,48 +138,34 @@ func (lb *LoadBalancer) HandleConn(clientConn net.Conn) {
 }
 
 func setNoDelay(conn net.Conn) {
-	if tcp, ok := conn.(*net.TCPConn); ok {
+	if tcp, ok := unwrapConn(conn).(*net.TCPConn); ok {
 		tcp.SetNoDelay(true)
 	}
 }
 
 func closeWrite(conn net.Conn) {
-	if tcp, ok := conn.(*net.TCPConn); ok {
+	if tcp, ok := unwrapConn(conn).(*net.TCPConn); ok {
 		tcp.CloseWrite()
 	}
 }
 
-func getClientIP(addr net.Addr) string {
-	if addr == nil {
-		return ""
-	}
-	switch a := addr.(type) {
-	case *net.TCPAddr:
-		return a.IP.String()
-	case *net.UDPAddr:
-		return a.IP.String()
-	}
-	// Fallback for mock/pipe/unix domain socket addresses
-	str := addr.String()
-	if host, _, err := net.SplitHostPort(str); err == nil {
-		return host
-	}
-	return str
-}
 func copyWithIdleTimeout(dst net.Conn, src net.Conn, buf []byte, idle *time.Duration) (int64, error) {
 	var total int64
 	var lastUpdate time.Time
 
+	// Set initial read deadline
+	if idle != nil {
+		src.SetReadDeadline(time.Now().Add(*idle))
+		lastUpdate = time.Now()
+	}
+
 	for {
-		if idle != nil {
-			if time.Since(lastUpdate) > 1*time.Second {
+		nr, err := src.Read(buf)
+		if nr > 0 {
+			if idle != nil && time.Since(lastUpdate) > 1*time.Second {
 				src.SetReadDeadline(time.Now().Add(*idle))
 				lastUpdate = time.Now()
 			}
-		}
-
-		nr, err := src.Read(buf)
-		if nr > 0 {
 			nw, werr := dst.Write(buf[:nr])
 			total += int64(nw)
 			if werr != nil {
@@ -188,10 +182,9 @@ func copyWithIdleTimeout(dst net.Conn, src net.Conn, buf []byte, idle *time.Dura
 	}
 }
 
-func (lb *LoadBalancer) ConfigureKeepAlive(conn net.Conn) {
-	rt := lb.Runtime.Load()
+func (lb *LoadBalancer) ConfigureKeepAlive(conn net.Conn, rt *config.Runtime) {
 
-	tcp, ok := conn.(*net.TCPConn)
+	tcp, ok := unwrapConn(conn).(*net.TCPConn)
 	if !ok {
 		return
 	}

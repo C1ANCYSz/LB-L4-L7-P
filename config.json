@@ -3,14 +3,14 @@
   "backends": [
     {
       "address": "http://localhost:3000",
-      "maxConnections": 100
+      "maxConnections": 100000000
     },
     {
       "address": "http://localhost:3001",
-      "maxConnections": 100
+      "maxConnections": 100000000
     }
   ],
-  "balanceMode": "leastConnections",
+  "balanceMode": "roundRobin",
 
   "maxConnections": 120000,
 
@@ -27,13 +27,6 @@
   "proxyProtocol": {
     "enabled": false,
     "version": 2
-  },
-
-  "tcpKeepAlive": {
-    "enabled": true,
-    "idleMs": 30000,
-    "intervalMs": 5000,
-    "count": 3
   },
 
   "healthCheck": {

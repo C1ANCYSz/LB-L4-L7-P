@@ -6,8 +6,8 @@ import (
 )
 
 type ConfigBackend struct {
-	Address string
-	MaxConn int
+	Address string `json:"address"`
+	MaxConn int    `json:"maxConnections"`
 }
 
 type Backend struct {
@@ -18,6 +18,7 @@ type Backend struct {
 	Resolving           atomic.Bool
 	ConsecutiveFailures atomic.Int32
 	ConsecutiveSuccess  atomic.Int32
+	MaxConn             atomic.Int32
 }
 type BackendPool struct {
 	Backends     []Backend
@@ -77,6 +78,7 @@ func NewBackendPool(backendsUrls []ConfigBackend) *BackendPool {
 		u := backend.Address
 		backends[i].Address.Store(&u)
 		backends[i].Up.Store(false)
+		backends[i].MaxConn.Store(int32(backend.MaxConn))
 	}
 
 	return &BackendPool{
