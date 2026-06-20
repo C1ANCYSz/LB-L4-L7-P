@@ -14,11 +14,11 @@
 
   "maxConnections": 120000,
 
-  "maxConcurrentConnectionsPerIP": 2,
+  "maxConcurrentConnectionsPerIP": 70000,
 
   "connectionRateLimitPerMinute": 1000000,
 
-  "idleTimeoutMs": null,
+  "idleTimeoutMs": 5000,
 
   "dnsRefreshIntervalMs": 15000,
 
